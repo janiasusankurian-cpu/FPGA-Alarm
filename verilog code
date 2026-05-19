@@ -1,0 +1,241 @@
+module aclock_pushbtn (
+    input clk50,                // 50 MHz FPGA clock
+    input reset,                // Active-high reset
+    input LD_time,              // Load current time (LEVEL-SENSITIVE SWITCH)
+    input LD_alarm,             // Load alarm time (LEVEL-SENSITIVE SWITCH)
+    input STOP_al,              // Stop alarm
+    input AL_ON,                // Alarm enable
+    input SET_SW,               // **NEW: Dedicated switch for Set Mode**
+
+    // Push-buttons for digits
+    input btn_H_tens,
+    input btn_H_ones,
+    input btn_M_tens,
+    input btn_M_ones,
+
+    output reg Alarm,           // Alarm indicator (LED)
+    output [41:0] seg           // Flattened 6x7-segment outputs
+);
+
+   
+    // 1. 1 Hz TICK Generator 
+    reg [25:0] div_cnt = 0;
+    
+    // TICK signal is HIGH for one clk50 cycle exactly every second
+    wire TICK;
+    assign TICK = (div_cnt == 50_000_000 - 1);  
+
+    always @(posedge clk50 or posedge reset) begin
+        if (reset) begin
+            div_cnt <= 0;
+        end else if (TICK) begin 
+            div_cnt <= 0;
+        end else
+            div_cnt <= div_cnt + 1;
+    end
+
+  
+    // 2. Debounce, Edge Detect, and Input Synchronization
+    
+    reg LD_time_sync = 1'b0; 
+    reg SET_MODE_sync = 1'b0;   // **NEW: Synchronized SET_SW**
+    
+    // Registers for active-low push-button debouncing
+    reg [3:0] btn_r, btn_rr;
+    wire pulse_H_tens, pulse_H_ones, pulse_M_tens, pulse_M_ones;
+
+    always @(posedge clk50) begin
+        // Synchronize inputs
+        LD_time_sync <= LD_time;
+        SET_MODE_sync <= SET_SW;    // **NEW**
+        
+        // Debounce registers
+        btn_r  <= {btn_H_tens, btn_H_ones, btn_M_tens, btn_M_ones};
+        btn_rr <= btn_r;
+    end
+
+    // Active-Low button fix: Detects HIGH-to-LOW transition (button press)
+    assign pulse_H_tens = ~btn_r[3] & btn_rr[3]; 
+    assign pulse_H_ones = ~btn_r[2] & btn_rr[2];
+    assign pulse_M_tens = ~btn_r[1] & btn_rr[1];
+    assign pulse_M_ones = ~btn_r[0] & btn_rr[0];
+
+   
+    // 3. Digit registers (Temporary values set by push-buttons)
+   
+    reg [1:0] H_in1 = 0;
+    reg [3:0] H_in0 = 0;
+    reg [3:0] M_in1 = 0;
+    reg [3:0] M_in0 = 0;
+    
+    // **UPDATED Set Mode Logic:** Enabled when SET_SW is HIGH.
+    wire digit_setting_enabled = SET_MODE_sync; 
+    
+    // Combined temporary hour/minute for use in Load blocks
+    wire [4:0] set_hour = H_in1 * 10 + H_in0; 
+    wire [5:0] set_minute = M_in1 * 10 + M_in0;
+    
+    always @(posedge clk50 or posedge reset) begin
+        if (reset) begin
+            H_in1 <= 0; H_in0 <= 0; M_in1 <= 0; M_in0 <= 0;
+        end else if (digit_setting_enabled) begin 
+            // Digit button increment logic (Same as before)
+            if (pulse_H_tens)
+                H_in1 <= (H_in1 == 2) ? 0 : H_in1 + 1;
+
+            if (pulse_H_ones) begin
+                if ((H_in1 == 2 && H_in0 == 3) || (H_in0 == 9))
+                    H_in0 <= 0;
+                else
+                    H_in0 <= H_in0 + 1;
+            end
+
+            if (pulse_M_tens)
+                M_in1 <= (M_in1 == 5) ? 0 : M_in1 + 1;
+
+            if (pulse_M_ones)
+                M_in0 <= (M_in0 == 9) ? 0 : M_in0 + 1;
+        end
+    end
+
+   
+    // 4. Clock time counters (FIXED Reset/Load Logic)
+ 
+    reg [5:0] tmp_second = 0;
+    reg [5:0] tmp_minute = 0;
+    reg [4:0] tmp_hour   = 0;
+
+    always @(posedge clk50 or posedge reset) begin 
+        if (reset) begin
+            // Standard reset: set time to 00:00:00
+            tmp_hour   <= 0;
+            tmp_minute <= 0;
+            tmp_second <= 0;
+        end else if (LD_time_sync) begin // Clock Load Mode
+            // LOAD: When LD_time is HIGH, load and hold the set value.
+            // Note: Since LD_time is now decoupled from setting, 
+            // the user must set the time with SET_SW first, then flip LD_time.
+            tmp_hour   <= set_hour;
+            tmp_minute <= set_minute;
+            tmp_second <= 0;
+        end else if (TICK) begin 
+            // COUNT: When LD_time is LOW and TICK is HIGH, the clock counts.
+            tmp_second <= tmp_second + 1;
+            
+            if (tmp_second == 59) begin
+                tmp_second <= 0;
+                tmp_minute <= tmp_minute + 1;
+                
+                if (tmp_minute == 59) begin
+                    tmp_minute <= 0;
+                    tmp_hour <= tmp_hour + 1;
+                    
+                    if (tmp_hour == 23)
+                        tmp_hour <= 0;
+                end
+            end
+        end
+    end
+
+    
+    // 5. Alarm registers and logic 
+
+    reg [4:0] alarm_hour = 0;
+    reg [5:0] alarm_minute = 0;
+
+    always @(posedge clk50 or posedge reset) begin
+        if (reset) begin
+            alarm_hour   <= 0;
+            alarm_minute <= 0;
+            Alarm        <= 0;
+        end else begin
+            if (LD_alarm) begin
+                // Load alarm time from temporary registers
+                alarm_hour   <= set_hour;
+                alarm_minute <= set_minute;
+            end
+
+            // Alarm trigger logic 
+            // Clock runs when LD_time_sync is LOW
+            if (~LD_time_sync && (tmp_hour == alarm_hour) && 
+                (tmp_minute == alarm_minute) &&
+                (tmp_second == 0) && AL_ON)
+                Alarm <= 1;
+
+            // Alarm stop logic
+            if (STOP_al)
+                Alarm <= 0;
+        end
+    end
+
+   
+    // 6. Display Driver (UPDATED MUX LOGIC)
+  
+    wire [3:0] dig [5:0];
+    
+    // **NEW MUX Wires**
+    wire show_set_mode = SET_MODE_sync;  // Display Set-Time while SET_SW is HIGH
+    wire show_alarm    = LD_alarm & ~show_set_mode; // Display Alarm-Time only if SET_SW is LOW
+                                                   // and LD_alarm is HIGH
+
+    wire [4:0] hour_to_display;
+    wire [5:0] minute_to_display;
+    wire [5:0] second_to_display;
+
+    // Display MUX logic (Priority: Set Time > Alarm Time > Current Time)
+    assign hour_to_display = show_set_mode   ? set_hour : 
+                             show_alarm      ? alarm_hour : 
+                                               tmp_hour;
+
+    assign minute_to_display = show_set_mode ? set_minute : 
+                               show_alarm    ? alarm_minute : 
+                                               tmp_minute;
+
+    assign second_to_display = show_set_mode ? 6'd0 :  // Seconds are 0 in Set/Load-Alarm mode
+                               show_alarm    ? 6'd0 : 
+                                               tmp_second;
+
+    // Binary-to-BCD conversion for display segments
+    assign dig[5] = hour_to_display   / 10;
+    assign dig[4] = hour_to_display   % 10;
+    assign dig[3] = minute_to_display / 10;
+    assign dig[2] = minute_to_display % 10;
+    assign dig[1] = second_to_display / 10;
+    assign dig[0] = second_to_display % 10;
+
+    genvar i;
+    generate
+        for (i = 0; i < 6; i = i + 1) begin : seg_loop
+            seven_seg_decoder sdec (
+                .bcd(dig[i]),
+                .seg(seg[i*7 +: 7])
+            );
+        end
+    endgenerate
+
+endmodule
+
+
+// BCD -> 7-segment decoder (active-low segments assumed)
+
+module seven_seg_decoder (
+    input [3:0] bcd,
+    output reg [6:0] seg
+);
+    always @(*) begin
+        // Segments a (MSB) to g (LSB). 0 means ON (Active-Low)
+        case (bcd)
+            4'd0: seg = 7'b1000000; // 0
+            4'd1: seg = 7'b1111001; // 1
+            4'd2: seg = 7'b0100100; // 2
+            4'd3: seg = 7'b0110000; // 3
+            4'd4: seg = 7'b0011001; // 4
+            4'd5: seg = 7'b0010010; // 5
+            4'd6: seg = 7'b0000010; // 6
+            4'd7: seg = 7'b1111000; // 7
+            4'd8: seg = 7'b0000000; // 8
+            4'd9: seg = 7'b0010000; // 9
+            default: seg = 7'b1111111; // Blank
+        endcase
+    end
+endmodule
