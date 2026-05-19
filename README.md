@@ -36,9 +36,6 @@ The FPGA receives a 50 MHz clock signal and divides it into a 1 Hz signal for ac
 ## Results
 The project was successfully synthesized and verified in Quartus Prime Lite and simulated using ModelSim-Altera.
 
-## Demo Video
-(Add your video link here)
-
 ## Author
 **Jania Susan**  
 B.Tech ECE | VIT Chennai
