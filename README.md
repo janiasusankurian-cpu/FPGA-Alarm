@@ -29,6 +29,23 @@ The FPGA receives a 50 MHz clock signal and divides it into a 1 Hz signal for ac
 - `alarm_clock.v` → Main Verilog module
 - `clock_divider.v` → Clock division logic
 - `testbench.v` → Simulation file
+## ADVANTAGES
+• High speed due to parallel hardware processing
+• Reconfigurable and easily extendable
+• Accurate timing unaffected by software delays
+• Low power consumption for digital operations
+• Highly reliable and stable operation
+## LIMITATIONS
+• No real-time retention during power loss
+• Push-button bounce can affect input accuracy
+• Limited display resolution compared to LCD/OLED
+• No built-in snooze or multi-alarm system
+## FUTURE WORK
+• Integration of external RTC module
+• LCD display integration
+• Bluetooth/mobile app-based alarm setting
+• Addition of snooze, multiple alarms, or switching modes
+• Using soft-core CPU (Nios II) for advanced features 
 
 ## Results
 The project was successfully synthesized and verified in Quartus Prime Lite and simulated using ModelSim-Altera.
