@@ -1,0 +1,10 @@
+SW0 → reset
+SW1 → SET_SW
+SW2 → LD_time
+SW3 → LD_alarm
+SW4 → AL_ON
+
+KEY0 → btn_H_tens
+KEY1 → btn_H_ones
+KEY2 → btn_M_tens
+KEY3 → btn_M_ones
